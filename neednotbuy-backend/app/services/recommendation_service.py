@@ -1,24 +1,41 @@
+import re
+
 from app.database.supabase_client import supabase
+
+
+# Words that describe the condition/type, not the product itself.
+NOISE_WORDS = {"second", "hand", "used", "new", "rent", "borrow", "buy"}
+
+
+def clean_item_name(name: str) -> str:
+    """Remove condition words like 'second hand' so only the product name remains."""
+    text = re.sub(r"[^a-z0-9\s_\-]", " ", (name or "").lower())
+    words = re.split(r"[\s_\-]+", text.strip())
+    return " ".join(w for w in words if w and w not in NOISE_WORDS)
 
 
 def search_items(item_name: str):
 
-    response = (
+    cleaned = clean_item_name(item_name)
+
+    query = (
         supabase
         .table("items")
         .select("*")
         .eq("availability", True)
-        .ilike("title", f"%{item_name}%")
-        .execute()
     )
+
+    # If nothing is left after cleaning (user typed only "second hand"),
+    # return all available items instead of nothing.
+    if cleaned:
+        query = query.or_(
+            f"title.ilike.%{cleaned}%,category.ilike.%{cleaned}%"
+        )
+
+    response = query.execute()
 
     return response.data
 
-
-# def test_search():
-#     items=search_items("projector")
-
-#     print(items)
 
 def calculate_cost(
     item: dict,
@@ -44,11 +61,9 @@ def calculate_cost(
     return 0
 
 
-
-
 def calculate_duration_score(
-item_type: str,
-duration_days: int
+    item_type: str,
+    duration_days: int
 ) -> float:
 
     if duration_days <= 3:
@@ -78,7 +93,6 @@ duration_days: int
     return scores.get(item_type, 0)
 
 
-
 def calculate_cost_score(
     cost: float,
     max_cost: float
@@ -101,7 +115,7 @@ def calculate_suitability_score(
 
     category = (item.get("category") or "").lower()
 
-    search_term = item_name.lower()
+    search_term = clean_item_name(item_name)
 
     if search_term in title:
         return 100
@@ -112,7 +126,6 @@ def calculate_suitability_score(
     return 0
 
 
-
 def calculate_availability_score(
     available: bool
 ) -> float:
@@ -121,8 +134,6 @@ def calculate_availability_score(
         return 100
 
     return 0
-
-
 
 
 def calculate_final_score(
@@ -142,7 +153,6 @@ def calculate_final_score(
     return round(final_score, 2)
 
 
-
 def apply_hard_rules(
     items: list,
     duration_days: int
@@ -160,8 +170,6 @@ def apply_hard_rules(
             return borrow_options[0]
 
     return None
-
-
 
 
 def generate_recommendation(
@@ -280,26 +288,19 @@ def generate_recommendation(
 
         selected = scored_options[0]
 
+    item_label = clean_item_name(requirement.item) or requirement.item
+
     return {
         "recommendation_type": selected["type"],
         "recommended_item": selected,
         "alternatives": scored_options,
         "reason": generate_explanation(
-            requirement.item,
+            item_label,
             requirement.duration_days,
             selected["type"],
             selected["estimated_cost"]
         )
     }
-
-
-
-
-
-
-
-
-
 
 
 def generate_explanation(

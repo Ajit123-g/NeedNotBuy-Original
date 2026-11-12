@@ -11,6 +11,17 @@ from app.schemas.ai import RequirementResponse
 client = Mistral(api_key=settings.MISTRAL_API_KEY)
 
 
+# Words that describe condition/type, not the product itself
+NOISE_WORDS = {"second", "hand", "used", "new", "rent", "borrow", "buy"}
+
+
+def _strip_noise(item: str) -> str:
+    """Remove words like 'second hand' so only the product name remains."""
+    words = re.split(r"[\s_\-]+", (item or "").lower().strip())
+    cleaned = " ".join(w for w in words if w and w not in NOISE_WORDS)
+    return cleaned or (item or "").strip()
+
+
 # ── Local fallback parser (used when Mistral is rate-limited) ────────────────
 
 def _parse_duration(text: str) -> int:
@@ -74,14 +85,14 @@ def _extract_item(text: str) -> str:
             # Remove trailing noise like "for 2 days"
             item = re.sub(r'\s*(for\s.*|to\s.*)$', '', item).strip()
             if item:
-                return item
+                return _strip_noise(item)
 
     # Last resort: return first noun-like word after "a/an/the"
     match = re.search(r'\b(?:a|an|the)\s+(\w+)', text_lower)
     if match:
-        return match.group(1)
+        return _strip_noise(match.group(1))
 
-    return text.split()[0] if text.strip() else "item"
+    return _strip_noise(text.split()[0]) if text.strip() else "item"
 
 
 def _parse_purpose(text: str) -> str | None:
@@ -138,6 +149,8 @@ Rules:
 - Extract only information supported by the user's message.
 - Do not recommend an option.
 - Do not invent prices or availability.
+- "item" must be ONLY the product name (for example: "projector", "drill machine", "camera").
+- Never put words like "second hand", "second", "used", "new", "rent", "borrow" or "buy" in "item".
 - If duration is not mentioned, use 1.
 - If purpose is not mentioned, use null.
 - urgency must be one of: low, normal, high.
@@ -167,6 +180,10 @@ User message:
             response_text = "\n".join(lines).strip()
 
         data = json.loads(response_text)
+
+        # Safety net: clean the item even if the AI ignored the rule
+        data["item"] = _strip_noise(data.get("item", ""))
+
         return RequirementResponse(**data)
 
     except Exception:
