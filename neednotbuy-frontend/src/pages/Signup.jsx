@@ -32,6 +32,7 @@ function Signup() {
         email: email.trim(),
         password,
         options: {
+          emailRedirectTo: window.location.origin,
           data: {
             name: name.trim(),
             phone_number: phone.trim(),
